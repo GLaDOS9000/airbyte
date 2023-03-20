@@ -10,12 +10,56 @@ import requests
 from airbyte_cdk.models import SyncMode
 from airbyte_cdk.sources.streams.http import HttpStream
 
-from .schemas import Application, BaseSchemaModel, Interview, Note, Offer, Opportunity, Referral, User
+from .schemas import Application, ArchiveReason, BaseSchemaModel, Interview, Note, Offer, Opportunity, Posting, Referral, Source, Stage, User
 
 
 class LeverHiringStream(HttpStream, ABC):
 
     primary_key = "id"
+    page_size = 50
+
+    stream_params = {}
+    API_VERSION = "v1"
+
+    def __init__(self, base_url: str, **kwargs):
+        super().__init__(**kwargs)
+        self.base_url = base_url
+
+    @property
+    def url_base(self) -> str:
+        return f"{self.base_url}/{self.API_VERSION}/"
+
+    def path(self, **kwargs) -> str:
+        return self.name
+
+    @property
+    @abstractmethod
+    def schema(self) -> BaseSchemaModel:
+        """Pydantic model that represents stream schema"""
+
+    def next_page_token(self, response: requests.Response) -> Optional[Mapping[str, Any]]:
+        response_data = response.json()
+        if response_data.get("hasNext"):
+            return {"offset": response_data["next"]}
+
+    def request_params(self, next_page_token: Mapping[str, Any] = None, **kwargs) -> MutableMapping[str, Any]:
+        params = {"limit": self.page_size}
+        params.update(self.stream_params)
+        if next_page_token:
+            params.update(next_page_token)
+        return params
+
+    def parse_response(self, response: requests.Response, **kwargs) -> Iterable[Mapping]:
+        yield from response.json()["data"]
+
+    def get_json_schema(self) -> Mapping[str, Any]:
+        """Use Pydantic schema"""
+        return self.schema.schema()
+
+
+class LeverHiringSourceStream(HttpStream, ABC):
+
+    primary_key = "text"
     page_size = 50
 
     stream_params = {}
@@ -120,6 +164,14 @@ class Applications(OpportynityChildStream):
     schema = Application
 
 
+class ArchiveReasons(LeverHiringStream):
+    """
+    Archive Reasons stream: https://hire.lever.co/developer/documentation#archive-reasons
+    """
+
+    schema = ArchiveReason
+
+
 class Interviews(OpportynityChildStream):
     """
     Interviews stream: https://hire.lever.co/developer/documentation#list-all-interviews
@@ -150,3 +202,19 @@ class Referrals(OpportynityChildStream):
     """
 
     schema = Referral
+
+
+class Sources(LeverHiringSourceStream):
+    """
+    Postings stream: https://hire.lever.co/developer/documentation#sources
+    """
+
+    schema = Source
+
+
+class Stages(LeverHiringStream):
+    """
+    Stages stream: https://hire.lever.co/developer/documentation#stages
+    """
+
+    schema = Stage
